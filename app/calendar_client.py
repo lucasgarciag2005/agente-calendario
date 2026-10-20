@@ -8,6 +8,7 @@ perder nada tuyo.
 from __future__ import annotations
 
 import datetime as dt
+import threading
 from dataclasses import dataclass
 
 from googleapiclient.discovery import build
@@ -69,6 +70,13 @@ def _find_existing(svc, name: str) -> str | None:
         raise
 
 
+# Las confirmaciones de Telegram se procesan en paralelo. Sin este candado,
+# tocar varios botones seguidos hace que varias llamadas vean el registro
+# vacio a la vez y cada una cree su propio calendario: terminas con tres
+# "Agente - Clases" y los eventos repartidos entre ellos.
+_candado_calendario = threading.Lock()
+
+
 def ensure_calendar(key: str) -> str:
     """Devuelve el id del calendario del agente, creandolo la primera vez."""
     from app.db import session_scope
@@ -81,6 +89,21 @@ def ensure_calendar(key: str) -> str:
         cached = kv_get(s, kv_key)
     if cached:
         return cached
+
+    with _candado_calendario:
+        # Volvemos a mirar ya adentro del candado: otro hilo pudo haberlo
+        # creado mientras esperabamos nuestro turno.
+        with session_scope() as s:
+            cached = kv_get(s, kv_key)
+        if cached:
+            return cached
+
+        return _crear_calendario(key, name, color, kv_key)
+
+
+def _crear_calendario(key: str, name: str, color: str, kv_key: str) -> str:
+    from app.db import session_scope
+    from app.store import kv_set
 
     svc = _service()
 

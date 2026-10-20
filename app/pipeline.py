@@ -5,7 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import logging
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app import calendar_client, gmail_client, privacy, security, telegram
 from app.config import settings
@@ -360,12 +360,23 @@ def _notify_deadline(
 
 
 def approve(proposal_id: int) -> str:
+    # Reservamos la propuesta con un UPDATE condicional, que la base resuelve
+    # de a uno. Si alguien ya la tomo, rowcount viene en cero y cortamos. Sin
+    # esto, un doble toque del boton -o un reintento del webhook de Telegram
+    # mientras el servicio despierta- crea el mismo evento dos veces.
+    with session_scope() as s:
+        if s.get(Proposal, proposal_id) is None:
+            return "No encuentro esa propuesta."
+        tomada = s.execute(
+            update(Proposal)
+            .where(Proposal.id == proposal_id, Proposal.status == "pending")
+            .values(status="agendando")
+        ).rowcount
+    if not tomada:
+        return "Ya estaba agendado."
+
     with session_scope() as s:
         proposal = s.get(Proposal, proposal_id)
-        if proposal is None:
-            return "No encuentro esa propuesta."
-        if proposal.status == "approved":
-            return "Ya estaba agendado."
         data = {
             "title": proposal.title,
             "description": proposal.description,
@@ -390,7 +401,12 @@ def approve(proposal_id: int) -> str:
             is_deadline=data["is_deadline"],
         )
     except Exception:
+        # Devolvemos la propuesta a pendiente para que puedas reintentarla.
         log.exception("No pude crear el evento de la propuesta %s", proposal_id)
+        with session_scope() as s:
+            fallida = s.get(Proposal, proposal_id)
+            if fallida and fallida.status == "agendando":
+                fallida.status = "pending"
         return "No pude crear el evento en el calendario. Mira los logs."
 
     with session_scope() as s:
