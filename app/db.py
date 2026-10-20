@@ -33,9 +33,18 @@ if es_sqlite:
     parent = os.path.dirname(os.path.abspath(path))
     os.makedirs(parent, exist_ok=True)
 
+if es_sqlite:
+    connect_args: dict = {"check_same_thread": False}
+else:
+    # Neon entrega un endpoint "-pooler" (PgBouncer en modo transaccion).
+    # psycopg empieza a preparar sentencias solas despues de unas pocas
+    # ejecuciones y ahi el pooler devuelve "prepared statement already
+    # exists" de forma intermitente. Apagarlo cuesta nada a esta escala.
+    connect_args = {"prepare_threshold": None}
+
 engine = create_engine(
     url,
-    connect_args={"check_same_thread": False} if es_sqlite else {},
+    connect_args=connect_args,
     # Neon cierra las conexiones ociosas, asi que las revisamos antes de usar
     # y las reciclamos seguido en vez de arrastrar una muerta.
     pool_pre_ping=True,
