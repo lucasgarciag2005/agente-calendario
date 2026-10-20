@@ -13,9 +13,22 @@ class Settings(BaseSettings):
         env_file=".env", env_file_encoding="utf-8", extra="ignore"
     )
 
-    # Anthropic
-    anthropic_api_key: str = ""
-    anthropic_model: str = "claude-opus-5-5"
+    # Gemini, por el tier gratuito de Google AI Studio.
+    gemini_api_key: str = ""
+    # Analizar un mail es la decision cara de equivocar: si lee mal una fecha
+    # limite, te perdes un tramite. Va con el modelo mas capaz que tengas.
+    # Cadena de respaldo, en orden de preferencia. El tier gratuito da unas 20
+    # consultas por dia POR MODELO, asi que cuando se agota uno el siguiente
+    # arranca con su cuota intacta. Sin esto el agente se queda mudo 8 horas.
+    # Los modelos "pro" no tienen cuota gratuita, por eso no estan.
+    gemini_models: str = (
+        "gemini-3.8-flash,gemini-3.7-flash,gemini-3.5-flash,"
+        "gemini-3.5-flash-lite,gemini-3.1-flash-lite"
+    )
+
+    @property
+    def modelos(self) -> list[str]:
+        return [m.strip() for m in self.gemini_models.split(",") if m.strip()]
 
     # Google
     google_client_id: str = ""

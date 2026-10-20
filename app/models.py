@@ -57,6 +57,10 @@ class Topic(Base):
     keywords: Mapped[list[str]] = mapped_column(JSON, default=list)
     # Remitentes que siempre son de este tema (ej. "@ciee.org").
     senders: Mapped[list[str]] = mapped_column(JSON, default=list)
+    # True = mirar SOLO esos remitentes e ignorar las palabras clave. Es el
+    # modo barato y preciso: no llega un mail que no sea de ellos, asi que no
+    # se gasta un analisis en basura.
+    senders_only: Mapped[bool] = mapped_column(Boolean, default=False)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[dt.datetime] = mapped_column(UtcDateTime, default=utcnow)
 

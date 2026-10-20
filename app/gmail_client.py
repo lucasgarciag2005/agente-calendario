@@ -28,6 +28,8 @@ class Email:
     to: str
     date: dt.datetime | None
     body: str
+    # Lo que los servidores de Google verificaron al recibir el mail.
+    auth_results: str = ""
 
     def as_prompt_text(self) -> str:
         fecha = self.date.isoformat() if self.date else "desconocida"
@@ -38,6 +40,20 @@ class Email:
             f"Asunto: {self.subject}\n\n"
             f"{self.body}"
         )
+
+    def as_subject_only(self) -> str:
+        """Igual que arriba pero sin el cuerpo, para remitentes sensibles."""
+        fecha = self.date.isoformat() if self.date else "desconocida"
+        return (
+            f"De: {self.sender}\n"
+            f"Fecha: {fecha}\n"
+            f"Asunto: {self.subject}\n\n"
+            "(El cuerpo de este mail no se comparte por privacidad. "
+            "Trabaja solo con el asunto.)"
+        )
+
+    def gmail_link(self) -> str:
+        return f"https://mail.google.com/mail/u/0/#inbox/{self.thread_id}"
 
 
 def _service():
@@ -88,13 +104,56 @@ def _header(headers: list[dict], name: str) -> str:
     return ""
 
 
-def build_query(keywords: list[str], senders: list[str], after_epoch: int | None) -> str:
-    """Prefiltro barato del lado de Gmail: solo bajamos mails candidatos."""
-    terms = [f'"{k}"' if " " in k else k for k in keywords]
-    terms += [f"from:{s}" for s in senders]
+# Pestanas de Gmail que nunca traen un tramite: promociones de aerolineas,
+# avisos de LinkedIn, novedades de foros. Sacarlas del prefiltro ahorra el
+# analisis de decenas de mails por mes.
+EXCLUDED_CATEGORIES = ["promotions", "social", "forums"]
+
+
+def build_query(
+    keywords: list[str],
+    senders: list[str],
+    after_epoch: int | None,
+    senders_only: bool = False,
+) -> str:
+    """Prefiltro barato del lado de Gmail: solo bajamos mails candidatos.
+
+    Con senders_only solo entran los mails de esos remitentes. Es el modo mas
+    preciso y el mas barato, porque cada mail que pasa el filtro es uno que de
+    verdad hay que analizar.
+    """
+    if senders_only and senders:
+        clause = "(" + " OR ".join(f"from:{s}" for s in senders) + ")"
+        parts = [clause]
+        if after_epoch:
+            parts.append(f"after:{after_epoch}")
+        parts.append("-in:spam")
+        parts.append("-in:trash")
+        return " ".join(parts)
+
+    # Las comillas fuerzan coincidencia exacta. Sin ellas Gmail parte los
+    # terminos con guion ("DS-160" -> DS sin 160) y ensucia los resultados.
+    # Un termino que ya viene entre parentesis se pasa tal cual: sirve para
+    # exigir que una palabra ambigua venga acompanada, por ejemplo
+    # "(visa (consulado OR entrevista))".
+    terms = [k if k.startswith("(") else f'"{k}"' for k in keywords]
     parts: list[str] = []
-    if terms:
-        parts.append("(" + " OR ".join(terms) + ")")
+
+    # Un remitente conocido entra aunque caiga en Promociones; una palabra
+    # clave suelta, no.
+    sender_clause = " OR ".join(f"from:{s}" for s in senders)
+    keyword_clause = " OR ".join(terms)
+    if keyword_clause:
+        negatives = " ".join(f"-category:{c}" for c in EXCLUDED_CATEGORIES)
+        keyword_clause = f"({keyword_clause}) {negatives}"
+
+    if sender_clause and keyword_clause:
+        parts.append(f"{{ ({sender_clause}) ({keyword_clause}) }}")
+    elif sender_clause:
+        parts.append(f"({sender_clause})")
+    elif keyword_clause:
+        parts.append(keyword_clause)
+
     if after_epoch:
         parts.append(f"after:{after_epoch}")
     parts.append("-in:spam")
@@ -150,6 +209,7 @@ def get_email(gmail_id: str) -> Email:
         to=_header(headers, "To"),
         date=date,
         body=_collect_body(payload),
+        auth_results=_header(headers, "Authentication-Results"),
     )
 
 

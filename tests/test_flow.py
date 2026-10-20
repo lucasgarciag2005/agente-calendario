@@ -51,6 +51,7 @@ email = gmail_client.Email(
     sender="CIEE <noreply@ciee.org>", to="yo@gmail.com",
     date=dt.datetime.now(dt.timezone.utc),
     body="You must pay the SEVIS fee before " + vence.strftime("%B %d, %Y"),
+    auth_results="mx.google.com; spf=pass smtp.mailfrom=ciee.org; dkim=pass header.i=@ciee.org; dmarc=pass header.from=ciee.org",
 )
 gmail_client.list_message_ids = lambda query, limit=60: ["msg-1"]
 gmail_client.get_email = lambda gid: email
@@ -70,7 +71,7 @@ P.analyze_email = lambda text, topics: analysis
 # ---- 4. Revisar el mail ----
 stats = pipeline.poll_emails()
 print("3. stats:", stats)
-assert stats == {"candidatos": 1, "nuevos": 1, "relevantes": 1, "propuestas": 1}, stats
+assert (stats["candidatos"], stats["nuevos"], stats["relevantes"], stats["propuestas"], stats["fallidos"]) == (1, 1, 1, 1, 0), stats
 
 with session_scope() as s:
     props = list(s.query(Proposal).all())

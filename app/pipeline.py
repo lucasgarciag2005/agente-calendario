@@ -7,7 +7,7 @@ import logging
 
 from sqlalchemy import select
 
-from app import calendar_client, gmail_client, telegram
+from app import calendar_client, gmail_client, privacy, security, telegram
 from app.config import settings
 from app.db import session_scope
 from app.llm import ChatEvent, EmailAnalysis, LLMRefusal, analyze_email
@@ -75,7 +75,10 @@ def build_rrule(days: list[str], until: dt.date | None) -> str:
 
 def poll_emails() -> dict[str, int]:
     """Busca mails nuevos de los temas vigilados y propone lo que encuentra."""
-    stats = {"candidatos": 0, "nuevos": 0, "relevantes": 0, "propuestas": 0}
+    stats = {
+        "candidatos": 0, "nuevos": 0, "privados": 0,
+        "relevantes": 0, "propuestas": 0, "fallidos": 0, "sospechosos": 0,
+    }
 
     with session_scope() as s:
         topics = active_topics(s)
@@ -116,12 +119,60 @@ def poll_emails() -> dict[str, int]:
             email = gmail_client.get_email(gmail_id)
         except Exception:
             log.exception("No pude leer el mail %s", gmail_id)
+            stats["fallidos"] += 1
             continue
 
         stats["nuevos"] += 1
 
+        # Primero de todo: si un mail que habla de plata no pasa la
+        # verificacion del remitente, avisar y no procesarlo. No queremos que
+        # un mail posiblemente falsificado te meta un pago en el calendario.
+        veredicto = security.evaluar(email.auth_results, email.subject, email.body)
+        if veredicto.alerta:
+            _notify_suspicious(email, veredicto)
+            with session_scope() as s:
+                s.add(
+                    SeenMessage(
+                        gmail_id=email.gmail_id,
+                        thread_id=email.thread_id,
+                        subject=email.subject,
+                        sender=email.sender,
+                        internal_date=email.date,
+                        relevant=True,
+                        summary=f"(no analizado: autenticacion {veredicto.resumen()})",
+                        analysis=None,
+                    )
+                )
+            stats["sospechosos"] += 1
+            continue
+
+        # Antes de mandar nada al modelo, ver hasta donde puede viajar este
+        # remitente. Con NOTIFY_ONLY el cuerpo no sale de la maquina.
+        mode = privacy.mode_for(email.sender)
+        if mode == privacy.NOTIFY_ONLY:
+            _notify_private(email)
+            with session_scope() as s:
+                s.add(
+                    SeenMessage(
+                        gmail_id=email.gmail_id,
+                        thread_id=email.thread_id,
+                        subject=email.subject,
+                        sender=email.sender,
+                        internal_date=email.date,
+                        relevant=True,
+                        summary="(no analizado: remitente privado)",
+                        analysis=None,
+                    )
+                )
+            stats["privados"] += 1
+            continue
+
+        texto = (
+            email.as_prompt_text() if mode == privacy.FULL else email.as_subject_only()
+        )
+
         try:
-            analysis = analyze_email(email.as_prompt_text(), topics)
+            analysis = analyze_email(texto, topics)
         except LLMRefusal as exc:
             log.warning("Claude declino analizar %s: %s", gmail_id, exc)
             telegram.send(
@@ -131,7 +182,10 @@ def poll_emails() -> dict[str, int]:
             )
             continue
         except Exception:
+            # No lo marcamos como visto: queremos reintentarlo en la proxima
+            # pasada, asi que tampoco movemos el cursor mas abajo.
             log.exception("Fallo el analisis de %s", gmail_id)
+            stats["fallidos"] += 1
             continue
 
         with session_scope() as s:
@@ -155,11 +209,57 @@ def poll_emails() -> dict[str, int]:
         stats["relevantes"] += 1
         stats["propuestas"] += _handle_relevant(email, analysis)
 
-    with session_scope() as s:
-        kv_set(s, "last_poll_epoch", str(new_cursor))
+    # Si algo fallo, dejamos el cursor donde estaba. Mover el cursor con un
+    # mail sin procesar lo perderia para siempre, porque la proxima consulta ya
+    # no lo traeria. Los que si se procesaron no se repiten: los filtra
+    # seen_messages.
+    if stats["fallidos"]:
+        log.warning(
+            "%s mail(s) sin procesar; no muevo el cursor para reintentarlos.",
+            stats["fallidos"],
+        )
+    else:
+        with session_scope() as s:
+            kv_set(s, "last_poll_epoch", str(new_cursor))
 
     log.info("Revision terminada: %s", stats)
     return stats
+
+
+def _notify_suspicious(email: gmail_client.Email, veredicto) -> None:
+    """Avisa de un mail que pide plata y no pasa la verificacion del remitente.
+
+    No decimos que sea una estafa: decimos que no se pudo probar quien lo mando,
+    que es justo lo que no se puede ignorar cuando hay plata de por medio.
+    """
+    telegram.send(
+        "⚠️ <b>CUIDADO: mail de pago sin verificar</b>\n\n"
+        f"<b>De:</b> {telegram.esc(email.sender)}\n"
+        f"<b>Asunto:</b> {telegram.esc(email.subject)}\n\n"
+        f"Este mail habla de dinero y <b>no pude verificar que venga de quien dice</b>.\n"
+        f"<code>{telegram.esc(veredicto.resumen())}</code>\n\n"
+        "<b>No uses los links ni los datos bancarios que traiga.</b> Si esperabas "
+        "este pago, entra vos a la plataforma o confirmalo por otro medio con la "
+        "persona de siempre.\n\n"
+        f'<a href="{email.gmail_link()}">Verlo en Gmail</a>\n'
+        "<i>No lo analice ni lo agende, justamente por esto.</i>"
+    )
+
+
+def _notify_private(email: gmail_client.Email) -> None:
+    """Avisa que llego un mail de un remitente privado, sin analizarlo.
+
+    Solo viaja a Telegram el asunto y el remitente, que ya los escribio el que
+    lo mando. El cuerpo no sale de aca.
+    """
+    telegram.send(
+        "\U0001f512 <b>Te llego un mail que no analizo</b>\n"
+        f"<i>{telegram.esc(email.sender)}</i>\n\n"
+        f"{telegram.esc(email.subject)}\n\n"
+        f'<a href="{email.gmail_link()}">Abrirlo en Gmail</a>\n'
+        "<i>Este remitente esta en tu lista privada, asi que el contenido no "
+        "sale de tu maquina. Si hay una fecha limite, decimela y la agendo.</i>"
+    )
 
 
 def _handle_relevant(email: gmail_client.Email, analysis: EmailAnalysis) -> int:

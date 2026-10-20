@@ -34,27 +34,48 @@ DEFAULT_TOPIC = {
         "medico, pasajes y vuelos, empleador o host, alojamiento, pagos a la agencia, "
         "sponsor, documentacion que haya que presentar y plazos del programa."
     ),
+    # Terminos especificos del programa, no palabras sueltas. "visa", "vuelo",
+    # "host" o "empleador" por si solas traen promos de aerolineas, recibos de
+    # tarjeta Visa y alertas de LinkedIn, y cada falso positivo cuesta un
+    # analisis. Lo que de verdad afina esto es cargar el remitente de la
+    # agencia en `senders` apenas lo sepas.
     "keywords": [
+        # La agencia, el empleador y el sistema de sueldos: especificos, casi
+        # sin ruido. Van tambien como palabra y no solo como remitente, asi
+        # entra un mail que los menciona aunque venga de otra direccion.
+        "weusa",
+        "westgate",
+        "slopeside",  # el alojamiento en Park City
+        "adp",
+        # Terminos del programa que no aparecen en ningun otro contexto.
         "work and travel",
         "work & travel",
-        "J-1",
-        "J1 visa",
         "DS-160",
+        "DS 160",
         "DS-2019",
+        "DS 2019",
         "SEVIS",
-        "visa",
-        "consulado",
-        "embajada",
+        "I-901",
+        "exchange visitor",
         "entrevista consular",
-        "sponsor",
-        "pasaje",
-        "vuelo",
-        "seguro medico",
-        "alojamiento",
-        "empleador",
-        "host",
+        "cita consular",
+        # "visa" sola trae todos los recibos de tarjeta, asi que solo cuenta
+        # si viene con una palabra del tramite. Gmail interpreta el espacio
+        # como Y, de modo que esto es: visa Y (alguna de estas).
+        "(visa (consulado OR embajada OR entrevista OR cita OR sponsor"
+        " OR appointment OR interview OR J-1 OR DS-160))",
     ],
-    "senders": [],
+    # Los remitentes que ya aparecieron en la casilla. Un mail de ellos entra
+    # aunque no diga ninguna palabra clave: eso salva los hilos tipo "Re: Re:"
+    # y los cambios de ultimo momento.
+    "senders": [
+        "weusa.com.ar",  # la agencia
+        "westgateresorts.com",  # el empleador
+        "adp.com",  # sueldos
+        "gozego.com",  # pagos del alojamiento
+        "docusign.net",  # contratos para firmar
+    ],
+    "senders_only": False,
 }
 
 

@@ -19,6 +19,25 @@ temas que vigila los configurás vos.
   los lunes y miércoles de 18 a 20 hasta el 20 de diciembre"* o *"del 5 al 20 de
   diciembre estoy de viaje"* y lo pasa a eventos, también con confirmación.
 
+## Dos protecciones que no son obvias
+
+**Remitentes privados.** Algunos mails traen datos que no tiene sentido
+mandarle a un modelo: el alta de empleado de ADP, con legajo, dirección y datos
+bancarios. Esos remitentes se listan en [`app/privacy.py`](app/privacy.py) y el
+agente **solo te avisa que llegaron**, con el asunto y un link a Gmail. El
+cuerpo no sale de tu máquina ni queda guardado en la base. Hay un modo
+intermedio, `SUBJECT_ONLY`, que manda el asunto y nunca el cuerpo.
+
+**Verificación del remitente.** Un estudiante de Work and Travel es un blanco
+cómodo para la estafa del falso pago de alojamiento: está en otro país, espera
+mails de pago, los montos son grandes. Por eso
+[`app/security.py`](app/security.py) lee los resultados de SPF, DKIM y DMARC
+que Google ya estampó al recibir el mail. Si un mail **habla de dinero y no
+pasa esa verificación**, el agente te manda una alerta distinta, no lo analiza
+y no agenda nada. Las dos condiciones tienen que darse juntas: un mail no
+verificado que no hable de plata no te molesta, y uno de pago verificado sigue
+su curso normal.
+
 ## Qué no puede hacer
 
 El token de Google que usa tiene el permiso `gmail.readonly` y nada más. Con ese
@@ -150,17 +169,33 @@ cp .env.example .env
 4. `TELEGRAM_CHAT_ID` dejalo vacío: se completa solo cuando le mandes `/start`
    al bot.
 
-## 3. Anthropic
+## 3. Gemini (gratis)
 
-Saca una API key en [console.anthropic.com](https://console.anthropic.com) y
-ponela en `ANTHROPIC_API_KEY`.
+Sacá una API key en [aistudio.google.com/apikey](https://aistudio.google.com/apikey)
+y ponela en `GEMINI_API_KEY`. No pide tarjeta.
 
-Sobre el modelo: `ANTHROPIC_MODEL=claude-opus-5-5` es el que mejor distingue un
-mail que de verdad te pide algo de uno que solo lo menciona. Cada mail analizado
-cuesta alrededor de **US$0,015**, y solo se analizan los que pasan el prefiltro
-de palabras clave, así que con unos 10 mails candidatos por día son unos **US$4
-al mes**. Si querés gastar casi nada, poné `claude-haiku-5-5`: baja a menos de
-US$0,20 al mes, a cambio de algún falso positivo más.
+`GEMINI_MODELS` es una **cadena de respaldo**, en orden de preferencia. Esto
+importa más de lo que parece: el nivel gratuito da alrededor de **20 consultas
+por día y por modelo** (no las 1500 que afirman varios blogs — lo verificamos
+contra el error real de la API). Cuando un modelo se queda sin saldo del día,
+el agente pasa solo al siguiente, que tiene su cuota intacta. Sin esa cadena el
+agente se queda mudo hasta el día siguiente.
+
+Con cinco modelos son unas 100 consultas diarias, y el agente usa una por mail
+que pasa el prefiltro, así que sobra de lejos.
+
+Los modelos `pro` no están en la cadena porque el nivel gratuito no les da
+cuota: devuelven 429 siempre.
+
+`scripts/check_setup.py` prueba la cadena de verdad y te dice cuál respondió y
+cuántos quedan de respaldo.
+
+> **Privacidad:** en el nivel gratuito, [los términos de la API de
+> Gemini](https://ai.google.dev/gemini-api/terms) permiten que Google use el
+> contenido enviado para mejorar sus productos y modelos. El agente le manda el
+> texto de los mails que pasan el prefiltro. Si eso no te cierra, las opciones
+> son pagar el nivel de pago de Gemini, que no tiene ese uso, o volver a un
+> proveedor pago como Anthropic.
 
 ## 4. Probar todo en local
 

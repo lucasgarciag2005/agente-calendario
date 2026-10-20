@@ -1,18 +1,21 @@
-"""Las dos llamadas a Claude: clasificar un mail y entender lo que le escribis.
+"""Las dos llamadas al modelo: clasificar un mail y entender lo que le escribis.
 
-Las dos usan structured outputs, asi que la respuesta siempre valida contra el
-esquema y no hace falta parsear texto libre.
+Usa Gemini por el tier gratuito de Google AI Studio. Las dos llamadas piden
+salida estructurada contra un esquema Pydantic, asi que la respuesta siempre
+valida y no hay que parsear texto libre.
 """
 
 from __future__ import annotations
 
 import datetime as dt
 import logging
+import time
 from functools import lru_cache
 from typing import Literal
 
-import anthropic
-from pydantic import BaseModel, Field
+from google import genai
+from google.genai import types
+from pydantic import BaseModel, Field, field_validator
 
 from app.config import settings
 from app.models import Topic
@@ -24,15 +27,137 @@ CalendarKey = Literal["work_travel", "clases", "viajes", "general"]
 DiaSemana = Literal["MO", "TU", "WE", "TH", "FR", "SA", "SU"]
 
 
+def _normalizar(*campos: str, mayuscula: bool = False):
+    """Acepta que el modelo devuelva "Alta" donde el esquema pide "alta".
+
+    Algunos modelos capitalizan los valores de enumeracion y eso rompe la
+    validacion de Pydantic, que distingue mayusculas. Lo vimos en la prueba.
+    """
+
+    @field_validator(*campos, mode="before")
+    @classmethod
+    def _v(cls, value):
+        if isinstance(value, str):
+            return value.upper() if mayuscula else value.lower()
+        if isinstance(value, list):
+            return [v.upper() if mayuscula else v.lower() if isinstance(v, str) else v for v in value]
+        return value
+
+    return _v
+
+
 class LLMRefusal(RuntimeError):
-    """Claude declino responder. Se avisa por Telegram y el mail queda sin tocar."""
+    """El modelo no devolvio una respuesta utilizable.
+
+    Puede ser un bloqueo por filtros de seguridad o una respuesta cortada. En
+    cualquier caso se avisa por Telegram y el mail queda sin tocar.
+    """
 
 
 @lru_cache
-def client() -> anthropic.Anthropic:
-    if not settings.anthropic_api_key:
-        raise RuntimeError("Falta ANTHROPIC_API_KEY")
-    return anthropic.Anthropic(api_key=settings.anthropic_api_key)
+def client() -> genai.Client:
+    if not settings.gemini_api_key:
+        raise RuntimeError(
+            "Falta GEMINI_API_KEY. Sacala gratis en https://aistudio.google.com/apikey"
+        )
+    return genai.Client(api_key=settings.gemini_api_key)
+
+
+# El tier gratuito devuelve 503 cuando el modelo esta saturado y 429 cuando te
+# pasaste de cuota. Las dos son transitorias y bastante comunes, asi que no
+# vale la pena perder un mail por eso.
+REINTENTOS = 4
+ESPERA_BASE = 4.0
+
+
+def _cuota_diaria_agotada(exc: Exception) -> bool:
+    """Un 429 de cuota diaria. Esperar no sirve: Google dice de volver en horas."""
+    texto = str(exc)
+    return "RESOURCE_EXHAUSTED" in texto.upper() and (
+        "PerDay" in texto or "per day" in texto.lower()
+    )
+
+
+def _es_transitorio(exc: Exception) -> bool:
+    """Saturacion momentanea o limite por minuto: esperar un poco si sirve."""
+    if _cuota_diaria_agotada(exc):
+        return False
+    codigo = getattr(exc, "code", None)
+    if codigo in (429, 503, 500):
+        return True
+    texto = str(exc).upper()
+    return any(s in texto for s in ("UNAVAILABLE", "RESOURCE_EXHAUSTED", "INTERNAL"))
+
+
+def _llamar(model: str, user_text: str, config) -> object:
+    """Una llamada a un modelo, con reintentos para los errores pasajeros."""
+    for intento in range(1, REINTENTOS + 1):
+        try:
+            return client().models.generate_content(
+                model=model, contents=user_text, config=config
+            )
+        except Exception as exc:
+            if intento == REINTENTOS or not _es_transitorio(exc):
+                raise
+            espera = ESPERA_BASE * (2 ** (intento - 1))
+            log.warning(
+                "%s no disponible (intento %s/%s), reintento en %.0fs: %s",
+                model, intento, REINTENTOS, espera, str(exc)[:110],
+            )
+            time.sleep(espera)
+    raise RuntimeError("inalcanzable")
+
+
+def _generate(system: str, user_text: str, schema: type[BaseModel]):
+    """Salida estructurada, recorriendo la cadena de modelos de respaldo.
+
+    La cuota gratuita se cuenta por modelo, asi que cuando uno se queda sin
+    saldo del dia pasamos al siguiente en vez de perder el mail.
+    """
+    config = types.GenerateContentConfig(
+        system_instruction=system,
+        response_mime_type="application/json",
+        response_schema=schema,
+        # Es extraccion de datos, no escritura: queremos la lectura mas
+        # literal posible del mail, no una interpretacion creativa.
+        temperature=0.0,
+    )
+
+    modelos = settings.modelos
+    ultimo: Exception | None = None
+
+    for i, model in enumerate(modelos):
+        try:
+            response = _llamar(model, user_text, config)
+            if i:
+                log.info("Resuelto con el modelo de respaldo %s", model)
+            break
+        except Exception as exc:
+            ultimo = exc
+            # Pasamos al siguiente modelo tanto si este se quedo sin cuota del
+            # dia como si sigue caido despues de los reintentos. Un error que
+            # no sea de disponibilidad (un esquema mal armado, por ejemplo) se
+            # propaga enseguida: probarlo en otro modelo no lo va a arreglar.
+            if not (_cuota_diaria_agotada(exc) or _es_transitorio(exc)):
+                raise
+            if i + 1 >= len(modelos):
+                raise
+            motivo = "sin cuota por hoy" if _cuota_diaria_agotada(exc) else "no responde"
+            log.warning("%s %s, paso a %s", model, motivo, modelos[i + 1])
+            continue
+    else:
+        raise ultimo or RuntimeError("sin modelos disponibles")
+
+    parsed = response.parsed
+    if parsed is None:
+        motivo = "sin candidatos"
+        if getattr(response, "candidates", None):
+            motivo = str(getattr(response.candidates[0], "finish_reason", "?"))
+        elif getattr(response, "prompt_feedback", None):
+            motivo = str(getattr(response.prompt_feedback, "block_reason", "?"))
+        raise LLMRefusal(f"el modelo no devolvio datos validos ({motivo})")
+
+    return parsed
 
 
 # --------------------------------------------------------------------------- #
@@ -53,6 +178,8 @@ class Deadline(BaseModel):
         description="El fragmento textual del mail de donde sacaste la fecha",
     )
 
+    _norm = _normalizar("confianza")
+
 
 class EmailAnalysis(BaseModel):
     relevante: bool = Field(description="True solo si el mail es de un tema vigilado")
@@ -62,6 +189,8 @@ class EmailAnalysis(BaseModel):
     accion: str = Field(default="", description="Que tenes que hacer, corto y concreto")
     fechas_limite: list[Deadline] = Field(default_factory=list)
     urgencia: Confianza = Field(default="baja")
+
+    _norm = _normalizar("urgencia")
 
 
 EMAIL_SYSTEM = """\
@@ -100,16 +229,7 @@ def analyze_email(email_text: str, topics: list[Topic]) -> EmailAnalysis:
         f"Temas que vigila:\n{temas}\n"
     )
 
-    resp = client().messages.parse(
-        model=settings.anthropic_model,
-        max_tokens=4000,
-        system=system,
-        messages=[{"role": "user", "content": f"<mail>\n{email_text}\n</mail>"}],
-        output_format=EmailAnalysis,
-    )
-    if resp.stop_reason == "refusal":
-        raise LLMRefusal(getattr(resp.stop_details, "explanation", "") or "sin detalle")
-    return resp.parsed_output
+    return _generate(system, f"<mail>\n{email_text}\n</mail>", EmailAnalysis)
 
 
 # --------------------------------------------------------------------------- #
@@ -140,6 +260,9 @@ class ChatEvent(BaseModel):
     )
     notas: str = Field(default="")
 
+    _norm = _normalizar("calendario")
+    _norm_dias = _normalizar("dias_semana", mayuscula=True)
+
 
 class NuevoTema(BaseModel):
     nombre: str = Field(default="")
@@ -154,6 +277,8 @@ class ChatIntent(BaseModel):
     respuesta: str = Field(description="Que le contestas, una o dos frases")
     eventos: list[ChatEvent] = Field(default_factory=list)
     tema: NuevoTema = Field(default_factory=NuevoTema)
+
+    _norm = _normalizar("intencion")
 
 
 CHAT_SYSTEM = """\
@@ -198,13 +323,14 @@ def parse_chat_message(text: str, topics: list[Topic]) -> ChatIntent:
         f"Temas que ya vigilas: {temas}.\n"
     )
 
-    resp = client().messages.parse(
-        model=settings.anthropic_model,
-        max_tokens=4000,
-        system=system,
-        messages=[{"role": "user", "content": text}],
-        output_format=ChatIntent,
-    )
-    if resp.stop_reason == "refusal":
-        raise LLMRefusal(getattr(resp.stop_details, "explanation", "") or "sin detalle")
-    return resp.parsed_output
+    return _generate(system, text, ChatIntent)
+
+
+def list_available_models() -> list[str]:
+    """Para chequear con que modelos responde tu key."""
+    out = []
+    for m in client().models.list():
+        actions = getattr(m, "supported_actions", None) or []
+        if not actions or "generateContent" in actions:
+            out.append((m.name or "").removeprefix("models/"))
+    return sorted(out)

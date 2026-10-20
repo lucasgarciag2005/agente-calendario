@@ -24,13 +24,23 @@ from google_auth_oauthlib.flow import InstalledAppFlow  # noqa: E402
 from app.google_auth import SCOPES  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
-SECRET_FILE = ROOT / "client_secret.json"
+
+
+def find_secret_file() -> Path | None:
+    """Google lo baja como client_secret_1234-abc.apps.googleusercontent.com.json.
+
+    Aceptamos cualquier nombre que empiece con client_secret asi no hace falta
+    renombrarlo a mano. El .gitignore ya excluye client_secret*.json.
+    """
+    candidates = sorted(ROOT.glob("client_secret*.json"))
+    return candidates[0] if candidates else None
 
 
 def client_config() -> dict:
-    if SECRET_FILE.exists():
-        data = json.loads(SECRET_FILE.read_text(encoding="utf-8"))
-        print(f"Usando {SECRET_FILE.name}")
+    secret_file = find_secret_file()
+    if secret_file:
+        data = json.loads(secret_file.read_text(encoding="utf-8"))
+        print(f"Usando {secret_file.name}")
         return data
 
     from app.config import settings
@@ -51,6 +61,27 @@ def client_config() -> dict:
             "redirect_uris": ["http://localhost"],
         }
     }
+
+
+def write_env(values: dict[str, str]) -> Path:
+    """Mete o reemplaza estas claves en el .env, dejando el resto intacto."""
+    env = ROOT / ".env"
+    if not env.exists():
+        env.write_text((ROOT / ".env.example").read_text(encoding="utf-8"), encoding="utf-8")
+
+    pending = dict(values)
+    out: list[str] = []
+    for line in env.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        key = line.split("=", 1)[0].strip() if "=" in line and not stripped.startswith("#") else None
+        if key in pending:
+            out.append(f"{key}={pending.pop(key)}")
+        else:
+            out.append(line)
+    out.extend(f"{key}={value}" for key, value in pending.items())
+
+    env.write_text("\n".join(out) + "\n", encoding="utf-8")
+    return env
 
 
 def main() -> None:
@@ -80,26 +111,25 @@ def main() -> None:
             "app y volve a correr el script."
         )
 
-    key_id = config["installed"]["client_id"] if "installed" in config else config["web"]["client_id"]
-    key_secret = (
-        config["installed"]["client_secret"] if "installed" in config else config["web"]["client_secret"]
+    block = config.get("installed") or config["web"]
+
+    path = write_env(
+        {
+            "GOOGLE_CLIENT_ID": block["client_id"],
+            "GOOGLE_CLIENT_SECRET": block["client_secret"],
+            "GOOGLE_REFRESH_TOKEN": creds.refresh_token,
+        }
     )
 
-    print("\n" + "=" * 70)
-    print("Copia estas tres lineas en tu .env (y en las variables del hosting):")
-    print("=" * 70)
-    print(f"GOOGLE_CLIENT_ID={key_id}")
-    print(f"GOOGLE_CLIENT_SECRET={key_secret}")
-    print(f"GOOGLE_REFRESH_TOKEN={creds.refresh_token}")
-    print("=" * 70)
+    # A proposito no imprimimos los valores: quedarian en la consola y en
+    # cualquier log. Van directo al .env, que el .gitignore ya excluye.
+    print(f"\nListo. Escribi 3 variables en {path.name}:")
+    print("  GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN")
+    print(f"\nPermisos concedidos: {', '.join(creds.scopes or SCOPES)}")
     print(
         "\nOJO: si en Google Cloud Console la app quedo en estado 'Testing', este\n"
-        "token se vence en 7 dias. Pasala a 'In production' (OAuth consent screen\n"
-        "-> Publish app) para que no caduque. Ver el README.\n"
+        "token se vence en 7 dias. Pasala a 'In production' para que no caduque.\n"
     )
-
-    if os.name == "nt":
-        print("Si no te abrio el navegador, copia la URL que salio arriba a mano.")
 
 
 if __name__ == "__main__":

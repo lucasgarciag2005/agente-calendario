@@ -37,16 +37,27 @@ def calendar() -> str:
     return "calendario listo: " + calendar_client.ensure_calendar("work_travel")
 
 
-def claude() -> str:
-    from app.llm import client
+def gemini() -> str:
+    from app.llm import client, list_available_models
 
-    resp = client().messages.create(
-        model=settings.anthropic_model,
-        max_tokens=16,
-        messages=[{"role": "user", "content": "Responde solo: ok"}],
-    )
-    texto = next((b.text for b in resp.content if b.type == "text"), "")
-    return f"{settings.anthropic_model} -> {texto.strip()[:20]}"
+    disponibles = set(list_available_models())
+    cadena = settings.modelos
+    faltan = [m for m in cadena if m not in disponibles]
+    if faltan:
+        raise RuntimeError(f"tu key no conoce: {', '.join(faltan)}")
+
+    # El primero que conteste es el que se va a usar. Los demas son respaldo
+    # para cuando ese se quede sin cuota del dia.
+    for i, m in enumerate(cadena):
+        try:
+            resp = client().models.generate_content(model=m, contents="Responde solo: ok")
+            resto = len(cadena) - i - 1
+            return f"{m} -> {(resp.text or '').strip()[:12]} ({resto} de respaldo)"
+        except Exception as exc:
+            if "RESOURCE_EXHAUSTED" in str(exc):
+                continue
+            raise
+    raise RuntimeError(f"los {len(cadena)} modelos sin cuota por hoy; vuelve manana")
 
 
 def bot() -> str:
@@ -70,10 +81,10 @@ def base_datos() -> str:
 
 def main() -> None:
     print(f"\nZona horaria: {settings.timezone}")
-    print(f"Modelo: {settings.anthropic_model}\n")
+    print("Cadena de modelos: " + " -> ".join(settings.modelos) + "\n")
 
     check("Base de datos", base_datos)
-    check("Claude", claude)
+    check("Gemini", gemini)
     check("Gmail", gmail)
     check("Google Calendar", calendar)
     check("Bot de Telegram", bot)
