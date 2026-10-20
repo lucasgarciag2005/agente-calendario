@@ -87,10 +87,30 @@ app = FastAPI(title="Agente Work and Travel", lifespan=lifespan)
 
 @app.get("/health")
 def health() -> dict[str, object]:
+    """Estado del agente y que configuracion ve el proceso.
+
+    De los secretos informa solo si estan cargados, nunca su contenido: sirve
+    para darse cuenta de que falta una variable sin exponer ninguna.
+    """
+    secretos = {
+        "GEMINI_API_KEY": settings.gemini_api_key,
+        "GOOGLE_CLIENT_ID": settings.google_client_id,
+        "GOOGLE_CLIENT_SECRET": settings.google_client_secret,
+        "GOOGLE_REFRESH_TOKEN": settings.google_refresh_token,
+        "TELEGRAM_BOT_TOKEN": settings.telegram_bot_token,
+        "TELEGRAM_CHAT_ID": settings.telegram_chat_id,
+        "TELEGRAM_WEBHOOK_SECRET": settings.telegram_webhook_secret,
+        "DATABASE_URL": settings.database_url,
+    }
     return {
         "ok": True,
         "jobs": [job.id for job in scheduler.get_jobs()],
         "chat_conectado": bool(telegram.resolve_chat_id()),
+        "faltan": sorted(k for k, v in secretos.items() if not v),
+        "cargadas": sorted(k for k, v in secretos.items() if v),
+        "base": "postgres" if "postgres" in settings.database_url else "sqlite",
+        "public_url": settings.public_url or "(vacio)",
+        "modelos": len(settings.modelos),
     }
 
 
