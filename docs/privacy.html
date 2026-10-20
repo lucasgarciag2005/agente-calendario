@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Política de privacidad</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #5a5a5a;
+    --line: #e2e2e2;
+    --accent: #2d5fd0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #15161a;
+      --fg: #eceef2;
+      --muted: #a0a4ad;
+      --line: #2b2d34;
+      --accent: #7aa2f7;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #15161a;
+    --fg: #eceef2;
+    --muted: #a0a4ad;
+    --line: #2b2d34;
+    --accent: #7aa2f7;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font: 16px/1.65 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    margin: 0;
+    padding: 48px 16px;
+  }
+  main { max-width: 680px; margin: 0 auto; }
+  h1 { font-size: 1.6rem; margin: 0 0 .15em; letter-spacing: -.02em; }
+  h2 { font-size: 1.05rem; margin: 2em 0 .5em; }
+  .sub { color: var(--muted); margin-top: 0; font-size: .95rem; }
+  ul { padding-left: 1.2em; }
+  li { margin: .4em 0; }
+  a { color: var(--accent); }
+  code {
+    background: color-mix(in srgb, var(--fg) 8%, transparent);
+    padding: .15em .4em; border-radius: 4px; font-size: .9em;
+  }
+  footer {
+    margin-top: 3em; padding-top: 1.5em;
+    border-top: 1px solid var(--line);
+    color: var(--muted); font-size: .9rem;
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Política de privacidad</h1>
+  <p class="sub">Agente Work and Travel · Última actualización: 20 de octubre de 2026</p>
+
+  <p>
+    Esta aplicación es un asistente personal de uso privado. La usa únicamente
+    su autor, sobre sus propias cuentas. No hay registro de usuarios ni acceso
+    de terceros.
+  </p>
+
+  <h2>Datos de Google a los que accede</h2>
+  <ul>
+    <li>
+      <strong>Correo (<code>gmail.readonly</code>)</strong>: lee el asunto, el
+      remitente, la fecha y el cuerpo de los mensajes que coinciden con los
+      temas configurados por el usuario, para detectar trámites con fecha
+      límite. Es un permiso de solo lectura: la aplicación no puede enviar,
+      responder, archivar, etiquetar ni borrar correo.
+    </li>
+    <li>
+      <strong>Calendario (<code>calendar.app.created</code>)</strong>: crea
+      calendarios propios y administra únicamente los eventos que ella misma
+      creó en ellos. No lee ni modifica los demás calendarios del usuario.
+    </li>
+  </ul>
+
+  <h2>Cómo se usan</h2>
+  <p>
+    El contenido de un mensaje se analiza para decidir si corresponde a un tema
+    que el usuario pidió vigilar y, en ese caso, extraer qué hay que hacer y
+    para cuándo. El resultado se le envía al propio usuario por Telegram, y si
+    lo confirma, se crea un evento en un calendario de la aplicación.
+  </p>
+
+  <h2>Terceros</h2>
+  <p>
+    Para ese análisis, el texto del mensaje se envía a la API de Anthropic
+    (Claude), que lo procesa y devuelve el resultado. Las notificaciones se
+    entregan a través de la API de Telegram. No se comparten datos con ningún
+    otro tercero, no se venden, no se usan para publicidad ni para entrenar
+    modelos.
+  </p>
+
+  <h2>Qué se guarda y por cuánto</h2>
+  <p>
+    En una base de datos privada del propio usuario se guardan los
+    identificadores de los mensajes ya analizados (para no procesarlos dos
+    veces), un resumen breve, y los eventos propuestos con su estado. No se
+    almacena el cuerpo completo de los mensajes. Los datos viven mientras la
+    aplicación esté en uso y se eliminan al borrarla.
+  </p>
+
+  <h2>Uso limitado</h2>
+  <p>
+    El uso que esta aplicación hace de la información recibida de las APIs de
+    Google se ajusta a la
+    <a href="https://developers.google.com/terms/api-services-user-data-policy">Política
+    de datos de usuario de los servicios de API de Google</a>, incluidos sus
+    requisitos de Uso Limitado.
+  </p>
+
+  <h2>Revocar el acceso</h2>
+  <p>
+    El usuario puede retirarle el permiso en cualquier momento desde
+    <a href="https://myaccount.google.com/permissions">la página de permisos de
+    su cuenta de Google</a>. Al hacerlo, la aplicación deja de tener acceso de
+    inmediato.
+  </p>
+
+  <h2>Contacto</h2>
+  <p>COMPLETAR-CON-TU-EMAIL</p>
+
+  <footer>
+    <a href="index.html">Volver al inicio</a>
+  </footer>
+</main>
+</body>
+</html>

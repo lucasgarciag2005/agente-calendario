@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agente Work and Travel</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #5a5a5a;
+    --line: #e2e2e2;
+    --accent: #2d5fd0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #15161a;
+      --fg: #eceef2;
+      --muted: #a0a4ad;
+      --line: #2b2d34;
+      --accent: #7aa2f7;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #15161a;
+    --fg: #eceef2;
+    --muted: #a0a4ad;
+    --line: #2b2d34;
+    --accent: #7aa2f7;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font: 16px/1.65 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    margin: 0;
+    padding: 48px 16px;
+  }
+  main { max-width: 680px; margin: 0 auto; }
+  h1 { font-size: 1.75rem; margin: 0 0 .25em; letter-spacing: -.02em; }
+  h2 { font-size: 1.1rem; margin: 2em 0 .5em; }
+  .sub { color: var(--muted); margin-top: 0; }
+  ul { padding-left: 1.2em; }
+  li { margin: .4em 0; }
+  a { color: var(--accent); }
+  footer {
+    margin-top: 3em; padding-top: 1.5em;
+    border-top: 1px solid var(--line);
+    color: var(--muted); font-size: .9rem;
+  }
+  code {
+    background: color-mix(in srgb, var(--fg) 8%, transparent);
+    padding: .15em .4em; border-radius: 4px; font-size: .9em;
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Agente Work and Travel</h1>
+  <p class="sub">Asistente personal de uso privado. No es un servicio público ni acepta registros.</p>
+
+  <h2>Qué hace</h2>
+  <p>
+    Es un asistente personal que una sola persona usa sobre su propia cuenta.
+    Revisa su casilla de correo en busca de mensajes sobre trámites con fecha
+    límite, le avisa por Telegram lo que tiene que hacer, y —solo cuando esa
+    persona lo confirma— crea el recordatorio en su calendario.
+  </p>
+
+  <h2>Qué permisos usa y para qué</h2>
+  <ul>
+    <li>
+      <code>gmail.readonly</code> — lee los mensajes para detectar trámites y
+      vencimientos. Es un permiso de <strong>solo lectura</strong>: la aplicación
+      no puede responder, reenviar, archivar, marcar ni borrar correo.
+    </li>
+    <li>
+      <code>calendar.app.created</code> — crea calendarios propios y administra
+      únicamente los eventos que la aplicación creó en ellos. No accede a los
+      demás calendarios del usuario.
+    </li>
+  </ul>
+
+  <h2>Alcance</h2>
+  <p>
+    La aplicación la usa exclusivamente su autor sobre sus propias cuentas. No
+    hay registro de usuarios, no hay terceros con acceso, y los datos no se
+    venden ni se comparten.
+  </p>
+
+  <footer>
+    <a href="privacy.html">Política de privacidad</a>
+  </footer>
+</main>
+</body>
+</html>
