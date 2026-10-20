@@ -531,8 +531,19 @@ def proposal_from_chat(event: ChatEvent) -> int | None:
 
 
 def send_reminders() -> int:
-    """Avisa de los vencimientos que se acercan. Corre una vez por dia."""
-    today = dt.datetime.now(settings.tz).date()
+    """Avisa de los vencimientos que se acercan.
+
+    Es idempotente: cada aviso queda anotado en reminders_sent, asi que se
+    puede llamar muchas veces por dia sin repetir nada. Eso es a proposito, y
+    es lo que hace que los recordatorios sobrevivan a un hosting que duerme:
+    no dependemos de que el proceso este vivo a una hora exacta, sino de que
+    en algun momento del dia corra una revision.
+    """
+    ahora = dt.datetime.now(settings.tz)
+    if ahora.hour < settings.daily_digest_hour:
+        return 0  # todavia es temprano, no te despertamos
+
+    today = ahora.date()
     sent = 0
 
     with session_scope() as s:

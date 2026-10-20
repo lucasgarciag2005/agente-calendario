@@ -29,6 +29,11 @@ def _safe_poll() -> None:
         pipeline.poll_emails()
     except Exception:
         log.exception("La revision programada del mail fallo")
+    # Los recordatorios van pegados a la revision, no solo al horario fijo.
+    # En un hosting que duerme, el disparo de las 9:00 puede no ocurrir nunca
+    # porque el proceso no esta vivo a esa hora; asi, cualquier revision del
+    # dia los manda. Repetirlos no hace dano: send_reminders es idempotente.
+    _safe_reminders()
 
 
 def _safe_reminders() -> None:
