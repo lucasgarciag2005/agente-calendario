@@ -12,3 +12,4 @@ beautifulsoup4>=4.12
 google-api-python-client>=2.149
 google-auth>=2.35
 google-auth-oauthlib>=1.2
+psycopg[binary]>=3.2

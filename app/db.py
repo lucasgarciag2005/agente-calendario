@@ -11,18 +11,35 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import settings
 
-url = settings.database_url
+def _normalizar(url: str) -> str:
+    """Deja la URL en la forma que espera SQLAlchemy con el driver psycopg.
+
+    Neon y la mayoria de los hostings entregan la cadena como `postgresql://`
+    (o `postgres://`, al estilo viejo de Heroku), que SQLAlchemy intentaria
+    abrir con psycopg2. Nosotros instalamos psycopg 3, asi que lo decimos.
+    """
+    for viejo in ("postgresql://", "postgres://"):
+        if url.startswith(viejo):
+            return "postgresql+psycopg://" + url[len(viejo):]
+    return url
+
+
+url = _normalizar(settings.database_url)
+es_sqlite = url.startswith("sqlite")
 
 # SQLite: asegurar que exista la carpeta del archivo.
-if url.startswith("sqlite"):
+if es_sqlite:
     path = url.split("///", 1)[-1]
     parent = os.path.dirname(os.path.abspath(path))
     os.makedirs(parent, exist_ok=True)
 
 engine = create_engine(
     url,
-    connect_args={"check_same_thread": False} if url.startswith("sqlite") else {},
+    connect_args={"check_same_thread": False} if es_sqlite else {},
+    # Neon cierra las conexiones ociosas, asi que las revisamos antes de usar
+    # y las reciclamos seguido en vez de arrastrar una muerta.
     pool_pre_ping=True,
+    pool_recycle=300 if not es_sqlite else -1,
 )
 
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
