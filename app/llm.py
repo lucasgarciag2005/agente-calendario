@@ -66,8 +66,12 @@ def client() -> genai.Client:
 # El tier gratuito devuelve 503 cuando el modelo esta saturado y 429 cuando te
 # pasaste de cuota. Las dos son transitorias y bastante comunes, asi que no
 # vale la pena perder un mail por eso.
-REINTENTOS = 4
-ESPERA_BASE = 4.0
+# Pocos reintentos y cortos a proposito: con cinco modelos en la cadena,
+# cambiar de modelo es mas barato que esperar a que uno saturado se libere.
+# Con 4 intentos y 4s de base se perdian 28 segundos antes de pasar al
+# siguiente, y vos esperabas media hora por un "hola".
+REINTENTOS = 2
+ESPERA_BASE = 1.5
 
 
 def _cuota_diaria_agotada(exc: Exception) -> bool:
