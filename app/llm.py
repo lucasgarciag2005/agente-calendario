@@ -72,6 +72,12 @@ def client() -> genai.Client:
 # siguiente, y vos esperabas media hora por un "hola".
 REINTENTOS = 2
 ESPERA_BASE = 1.5
+# Milisegundos. Una respuesta normal tarda 2-4s; mas de 15 significa que ese
+# modelo esta saturado y conviene probar el siguiente.
+TIMEOUT_MS = 15000
+# Tope total para lo que escribis por chat. El analisis de mails no lo usa:
+# ahi nadie esta esperando y conviene agotar la cadena.
+LIMITE_CHAT_S = 32.0
 
 
 def _cuota_diaria_agotada(exc: Exception) -> bool:
@@ -90,6 +96,8 @@ def _es_transitorio(exc: Exception) -> bool:
     if codigo in (429, 503, 500):
         return True
     texto = str(exc).upper()
+    if any(s in texto for s in ("TIMEOUT", "TIMED OUT", "READTIMEOUT", "DEADLINE")):
+        return True
     return any(s in texto for s in ("UNAVAILABLE", "RESOURCE_EXHAUSTED", "INTERNAL"))
 
 
@@ -112,7 +120,7 @@ def _llamar(model: str, user_text: str, config) -> object:
     raise RuntimeError("inalcanzable")
 
 
-def _generate(system: str, user_text: str, schema: type[BaseModel]):
+def _generate(system: str, user_text: str, schema: type[BaseModel], limite_s: float | None = None):
     """Salida estructurada, recorriendo la cadena de modelos de respaldo.
 
     La cuota gratuita se cuenta por modelo, asi que cuando uno se queda sin
@@ -125,12 +133,23 @@ def _generate(system: str, user_text: str, schema: type[BaseModel]):
         # Es extraccion de datos, no escritura: queremos la lectura mas
         # literal posible del mail, no una interpretacion creativa.
         temperature=0.0,
+        # Tope duro por llamada. Sin esto, un modelo saturado del tier
+        # gratuito se queda colgado y arrastra a toda la cadena: con cinco
+        # modelos, un "hola" puede tardar minutos y la respuesta nunca llega.
+        # Cortar y pasar al siguiente es siempre mejor que esperar.
+        http_options=types.HttpOptions(timeout=TIMEOUT_MS),
     )
 
     modelos = settings.modelos
     ultimo: Exception | None = None
+    inicio = time.monotonic()
 
     for i, model in enumerate(modelos):
+        # Con alguien esperando en el chat, mejor avisar que no se pudo que
+        # dejarlo mirando la pantalla mientras recorremos cinco modelos.
+        if limite_s is not None and time.monotonic() - inicio > limite_s:
+            log.warning("Presupuesto de %.0fs agotado en %s", limite_s, model)
+            break
         try:
             response = _llamar(model, user_text, config)
             if i:
@@ -327,7 +346,8 @@ def parse_chat_message(text: str, topics: list[Topic]) -> ChatIntent:
         f"Temas que ya vigilas: {temas}.\n"
     )
 
-    return _generate(system, text, ChatIntent)
+    # Vos estas esperando del otro lado: preferimos cortar y contestarte.
+    return _generate(system, text, ChatIntent, limite_s=LIMITE_CHAT_S)
 
 
 def list_available_models() -> list[str]:
