@@ -91,6 +91,27 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Agente Work and Travel", lifespan=lifespan)
 
 
+def _describir(update: dict) -> str:
+    """Que clase de update llego, para poder diagnosticar sin los logs.
+
+    Guarda el tipo y el largo, nunca lo que escribiste.
+    """
+    if "callback_query" in update:
+        return "boton"
+    msg = update.get("message") or update.get("edited_message") or {}
+    if not msg:
+        return "otro"
+    texto = msg.get("text") or msg.get("caption")
+    if texto:
+        clase = "comando" if texto.startswith("/") else "texto"
+        return f"{clase}:{len(texto)}"
+    for k in ("voice", "audio", "photo", "video", "video_note", "document",
+              "sticker", "location", "contact", "poll"):
+        if k in msg:
+            return k
+    return "sin-texto"
+
+
 @app.get("/health")
 def health() -> dict[str, object]:
     """Estado del agente y que configuracion ve el proceso.
@@ -140,7 +161,7 @@ async def telegram_webhook(
     # quede ningun error registrado. Una peticion en curso mantiene viva la
     # instancia hasta que termina.
     update_id = update.get("update_id")
-    if update_id is not None and not store.claim_update(update_id):
+    if update_id is not None and not store.claim_update(update_id, _describir(update)):
         log.info("Update %s repetido, lo ignoro", update_id)
         return {"ok": True, "repetido": True}
 

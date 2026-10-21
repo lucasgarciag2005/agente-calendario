@@ -21,7 +21,7 @@ def kv_set(s: Session, key: str, value: str) -> None:
         s.add(KeyValue(key=key, value=value))
 
 
-def claim_update(update_id: int) -> bool:
+def claim_update(update_id: int, descripcion: str = "") -> bool:
     """Reserva un update de Telegram. False si ya se habia procesado.
 
     Telegram reintenta un update si tardamos en contestar, y ahora que el
@@ -34,7 +34,7 @@ def claim_update(update_id: int) -> bool:
 
     s = SessionLocal()
     try:
-        s.add(KeyValue(key=f"tg:{update_id}", value=""))
+        s.add(KeyValue(key=f"tg:{update_id}", value=descripcion or ""))
         s.commit()
         return True
     except IntegrityError:

@@ -77,8 +77,32 @@ def _handle_callback(callback: dict) -> None:
 
 def _handle_message(message: dict) -> None:
     chat_id = str(message.get("chat", {}).get("id", ""))
-    text = (message.get("text") or "").strip()
-    if not chat_id or not text:
+    text = (message.get("text") or message.get("caption") or "").strip()
+    if not chat_id:
+        return
+
+    if not text:
+        # Antes se volvia en silencio: mandabas un audio o una foto y el
+        # agente no contestaba nada, que por fuera es indistinguible de que
+        # este caido.
+        tipo = next(
+            (k for k in ("voice", "audio", "photo", "video", "video_note",
+                         "document", "sticker", "location", "contact", "poll")
+             if k in message),
+            "ese tipo de mensaje",
+        )
+        nombres = {
+            "voice": "los audios", "audio": "los audios", "photo": "las fotos",
+            "video": "los videos", "video_note": "los videos",
+            "document": "los archivos", "sticker": "los stickers",
+            "location": "las ubicaciones", "contact": "los contactos",
+            "poll": "las encuestas",
+        }
+        telegram.send(
+            f"Por ahora no entiendo {nombres.get(tipo, tipo)}. "
+            "Escribime en texto lo que queres agendar.",
+            chat_id=chat_id,
+        )
         return
 
     if text.startswith("/"):

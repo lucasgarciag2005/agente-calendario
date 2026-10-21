@@ -40,3 +40,29 @@ with TestClient(app) as c:
     assert "ultimo_error_envio" in salud
 
 print("\nWEBHOOK TEST OK")
+
+# --- un mensaje sin texto debe contestar, no callarse ---
+import app.handlers as H
+from app import telegram as T
+enviados = []
+T.send = lambda text, keyboard=None, chat_id=None: (enviados.append(text), 1)[1]
+import importlib
+importlib.reload(H)
+H.telegram.send = T.send
+
+H._handle_message({"chat": {"id": 1}, "voice": {"duration": 3}})
+print("5. audio ->", enviados[-1][:60])
+assert "audios" in enviados[-1]
+
+H._handle_message({"chat": {"id": 1}, "photo": []})
+print("6. foto  ->", enviados[-1][:60])
+assert "fotos" in enviados[-1]
+
+# una foto con epigrafe si se procesa como texto
+leidos = []
+H.parse_chat_message = lambda t, topics: (_ for _ in ()).throw(RuntimeError("stub"))
+H._handle_message({"chat": {"id": 1}, "photo": [], "caption": "el 3 de noviembre tengo la entrevista"})
+print("7. foto con epigrafe -> se intenta interpretar el texto")
+assert "fotos" not in enviados[-1]
+
+print("\nSIN-TEXTO OK")
