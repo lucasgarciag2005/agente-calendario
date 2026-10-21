@@ -9,8 +9,9 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
+from starlette.concurrency import run_in_threadpool
 
-from app import handlers, pipeline, telegram
+from app import handlers, pipeline, store, telegram
 from app.config import settings
 from app.db import init_db, session_scope
 from app.store import seed_default_topic
@@ -116,6 +117,7 @@ def health() -> dict[str, object]:
         "base": "postgres" if "postgres" in settings.database_url else "sqlite",
         "public_url": settings.public_url or "(vacio)",
         "modelos": len(settings.modelos),
+        "ultimo_error_envio": telegram.ultimo_error or "ninguno",
     }
 
 
@@ -131,8 +133,18 @@ async def telegram_webhook(
         raise HTTPException(status_code=403, detail="secreto invalido")
 
     update = await request.json()
-    # Telegram reintenta si tardamos; contestamos ya y trabajamos atras.
-    background.add_task(handlers.handle_update, update)
+
+    # El trabajo se hace ANTES de contestarle a Telegram, a proposito. Si lo
+    # dejaramos en segundo plano, en un hosting que se apaga por inactividad
+    # la tarea puede morir a mitad de camino y vos no recibis nada, sin que
+    # quede ningun error registrado. Una peticion en curso mantiene viva la
+    # instancia hasta que termina.
+    update_id = update.get("update_id")
+    if update_id is not None and not store.claim_update(update_id):
+        log.info("Update %s repetido, lo ignoro", update_id)
+        return {"ok": True, "repetido": True}
+
+    await run_in_threadpool(handlers.handle_update, update)
     return {"ok": True}
 
 

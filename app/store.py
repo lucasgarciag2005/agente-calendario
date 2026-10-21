@@ -21,6 +21,29 @@ def kv_set(s: Session, key: str, value: str) -> None:
         s.add(KeyValue(key=key, value=value))
 
 
+def claim_update(update_id: int) -> bool:
+    """Reserva un update de Telegram. False si ya se habia procesado.
+
+    Telegram reintenta un update si tardamos en contestar, y ahora que el
+    trabajo se hace antes de responder, tardar es normal. Sin esta reserva un
+    reintento agendaria el mismo evento dos veces.
+    """
+    from sqlalchemy.exc import IntegrityError
+
+    from app.db import SessionLocal
+
+    s = SessionLocal()
+    try:
+        s.add(KeyValue(key=f"tg:{update_id}", value=""))
+        s.commit()
+        return True
+    except IntegrityError:
+        s.rollback()
+        return False
+    finally:
+        s.close()
+
+
 def active_topics(s: Session) -> list[Topic]:
     return list(s.scalars(select(Topic).where(Topic.active.is_(True))))
 

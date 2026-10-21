@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import html
 import logging
+import re
 from typing import Any
 
 import httpx
@@ -13,6 +15,10 @@ from app.config import settings
 log = logging.getLogger(__name__)
 
 TIMEOUT = 20.0
+
+# Ultimo fallo de envio, expuesto en /health: sin esto, que el agente no
+# pueda hablarte es invisible desde afuera.
+ultimo_error: str = ""
 
 
 class TelegramError(RuntimeError):
@@ -80,8 +86,22 @@ def send(
     try:
         return call("sendMessage", payload).get("message_id")
     except TelegramError as exc:
+        # Un fallo aca deja al agente mudo sin que nadie se entere, asi que lo
+        # dejamos anotado para /health y reintentamos en crudo: la causa mas
+        # comun es un caracter que rompe el formato HTML.
+        global ultimo_error
+        ultimo_error = f"{dt.datetime.now(dt.timezone.utc):%d/%m %H:%M}Z - {exc}"[:300]
         log.error("No se pudo mandar el mensaje: %s", exc)
-        return None
+        try:
+            payload.pop("parse_mode", None)
+            payload["text"] = re.sub(r"<[^>]+>", "", text)
+            message_id = call("sendMessage", payload).get("message_id")
+            log.warning("Reenviado sin formato HTML")
+            return message_id
+        except TelegramError as exc2:
+            ultimo_error = f"{ultimo_error} | sin formato: {exc2}"[:300]
+            log.error("Tampoco salio sin formato: %s", exc2)
+            return None
 
 
 def edit(message_id: int, text: str, chat_id: str | None = None) -> None:
