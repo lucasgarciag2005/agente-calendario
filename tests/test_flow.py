@@ -8,6 +8,9 @@ os.environ.update({
     "TELEGRAM_BOT_TOKEN": "123:fake",
     "TELEGRAM_WEBHOOK_SECRET": "s",
     "DATABASE_URL": "sqlite:///./data/flow-test.db",
+    # Sin esto el test solo pasa despues de las 9: send_reminders no manda
+    # nada antes de esa hora, y entonces fallaba segun cuando se corriera.
+    "DAILY_DIGEST_HOUR": "0",
 })
 for f in (ROOT/"data"/"flow-test.db",):
     f.unlink(missing_ok=True)
